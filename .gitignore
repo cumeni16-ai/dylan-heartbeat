@@ -7,3 +7,4 @@ enhanced_messages.json*
 .DS_Store
 presets.json
 wake_prompt.txt
+diary/

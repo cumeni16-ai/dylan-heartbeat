@@ -9,6 +9,10 @@ const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
 const HEARTBEAT_URL = `${GATEWAY_BASE_URL}/internal/heartbeat`;
 const TIME_ZONE = process.env.TIME_ZONE || "Europe/London";
 const WEATHER_TIMEOUT_MS = 5000;
+const DIARY_DIR_NAME = process.env.DIARY_DIR || "diary";
+const DIARY_DIR_PATH = path.isAbsolute(DIARY_DIR_NAME)
+  ? DIARY_DIR_NAME
+  : path.join(__dirname, DIARY_DIR_NAME);
 
 function readNumberEnv(key, fallback, options = {}) {
   const value = Number(process.env[key]);
@@ -22,6 +26,134 @@ function readBooleanEnv(key, fallback = false) {
   const raw = String(process.env[key] ?? "").trim().toLowerCase();
   if (!raw) return fallback;
   return ["1", "true", "yes", "on"].includes(raw);
+}
+
+function getDatePartsInTimeZone(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+  return {
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: parts.hour,
+    minute: parts.minute
+  };
+}
+
+function getDiaryDateString(date = new Date()) {
+  const parts = getDatePartsInTimeZone(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function getDiaryTimeString(date = new Date()) {
+  const parts = getDatePartsInTimeZone(date);
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
+// 批注 2026-07-11：日记只接受模型显式输出的 [DIARY] 块，避免把普通推送内容误写进本地日记。
+function extractDiaryFromResponse(text) {
+  const diaryBlocks = [];
+  const remainingText = String(text || "").replace(/\[DIARY\]([\s\S]*?)\[\/DIARY\]/gi, (_, content) => {
+    const diary = String(content || "").trim();
+    if (diary) diaryBlocks.push(diary);
+    return "";
+  }).trim();
+  return {
+    diaryContent: diaryBlocks.join("\n\n").trim(),
+    remainingText
+  };
+}
+
+function appendDiaryEntry(content) {
+  if (!readBooleanEnv("DIARY_ENABLED", true)) {
+    console.log("模型写了日记，但 DIARY_ENABLED=false，本次不保存");
+    return false;
+  }
+
+  const cleanContent = String(content || "").trim();
+  if (!cleanContent) return false;
+
+  fs.mkdirSync(DIARY_DIR_PATH, { recursive: true });
+  const diaryFile = path.join(DIARY_DIR_PATH, `${getDiaryDateString()}.md`);
+  const entry = `\n\n## ${getDiaryTimeString()}\n\n${cleanContent}\n`;
+  fs.appendFileSync(diaryFile, entry, "utf-8");
+  console.log(`已保存日记：${diaryFile}`);
+  return true;
+}
+
+// 批注 2026-07-11：推送层扩展为 Bark/ntfy；默认仍走 Bark，保护旧部署不改 .env 也能继续运行。
+async function sendPushNotification({ title, body }) {
+  const provider = (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase();
+
+  if (provider === "ntfy") {
+    const topic = String(process.env.NTFY_TOPIC || "").trim();
+    if (!topic) return { ok: false, providerLabel: "ntfy", reason: "NTFY_TOPIC 未配置" };
+
+    const server = (process.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "");
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
+    const payload = {
+      topic,
+      title,
+      message: body
+    };
+    if (process.env.NTFY_PRIORITY) payload.priority = process.env.NTFY_PRIORITY;
+    if (process.env.NTFY_TAGS) payload.tags = process.env.NTFY_TAGS.split(",").map(tag => tag.trim()).filter(Boolean);
+
+    const response = await fetch(server, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      return { ok: false, providerLabel: "ntfy", reason: responseText || `HTTP ${response.status}` };
+    }
+    return { ok: true, providerLabel: "ntfy" };
+  }
+
+  if (provider !== "bark") {
+    return { ok: false, providerLabel: provider || "未知渠道", reason: `不支持的 PUSH_PROVIDER：${provider}` };
+  }
+
+  if (!process.env.BARK_KEY) {
+    return { ok: false, providerLabel: "Bark", reason: "Bark Key 未配置" };
+  }
+
+  const barkPayload = {
+    title,
+    body,
+    device_key: process.env.BARK_KEY,
+    icon: process.env.CUSTOM_ICON_URL
+  };
+
+  const response = await fetch("https://api.day.app/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(barkPayload)
+  });
+
+  const responseText = await response.text();
+  let result = {};
+  try {
+    result = JSON.parse(responseText);
+  } catch {}
+  console.log("\nBark Result:\n", result || responseText);
+
+  if (!response.ok || (result.code && result.code !== 200)) {
+    return { ok: false, providerLabel: "Bark", reason: result.message || `HTTP ${response.status}` };
+  }
+  return { ok: true, providerLabel: "Bark" };
 }
 
 function isDayTime(date = new Date()) {
@@ -248,8 +380,9 @@ function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
 ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
-- 如果想联系用户，直接写你想说的话。系统会自动打包成 Bark 推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
+- 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
+- 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
 }
 
@@ -357,30 +490,36 @@ ${historyText}`
   console.log("\nWake Result:\n");
   console.log(JSON.stringify(data, null, 2));
 
-  const aiText = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
+  const rawAiText = normalizeContentToText(data.choices?.[0]?.message?.content).trim();
   console.log("\nAI内容：\n");
-  console.log(aiText);
+  console.log(rawAiText);
+
+  const diaryResult = extractDiaryFromResponse(rawAiText);
+  const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
+  const aiText = diaryResult.remainingText;
 
   let eventContent;
 
   if (!aiText) {
-    console.log("\nAI 返回空内容，本次不发送 Bark\n");
-    eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark｜原因：模型空回复）`;
+    console.log("\nAI 未返回推送内容，本次不发送推送\n");
+    eventContent = diarySaved
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
   } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
     const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
-    // AI 选择不发送 Bark
-    console.log("\nAI 选择不发送 Bark\n");
+    // AI 选择不发送推送
+    console.log("\nAI 选择不发送推送\n");
     let reason = (noActionMatch[1] || "").trim();
     if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
       reason = reason.replace(/^原因[：:]\s*/, "").trim();
     }
     eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark）`;
+      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
+      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
-    // 没有 [NO_ACTION] 就视为想发 Bark
-    console.log("\nAI 选择发送 Bark\n");
+    // 没有 [NO_ACTION] 就视为想发推送
+    console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
 
     // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
@@ -402,8 +541,8 @@ ${historyText}`
 
     let title, body;
     if (lines.length === 0) {
-      console.log("\nBark 内容清洗后为空，本次不发送 Bark\n");
-      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark｜原因：Bark 内容为空）`;
+      console.log("\n推送内容清洗后为空，本次不发送推送\n");
+      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：推送内容为空）`;
     } else if (lines.length === 1) {
       title = "来自AI";
       body = lines[0].trim();
@@ -417,43 +556,18 @@ ${historyText}`
     }
 
     if (!eventContent) {
-      // 保护：截断过长正文（Bark 限制约 500 字符）
+      // 保护：截断过长正文，兼容 Bark 和 ntfy 的移动端展示。
       const safeBody = body.length > 500 ? body.substring(0, 497) + "..." : body;
       // 若标题为空或以数字开头，加个前缀，可自行修改
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
 
-      if (!process.env.BARK_KEY) {
-        console.log("\n未配置 BARK_KEY，本次不发送 Bark\n");
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark｜原因：Bark Key 未配置）`;
+      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+      if (!pushResult.ok) {
+        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
+        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
       } else {
-        const barkPayload = {
-          title: safeTitle,
-          body: safeBody,
-          device_key: process.env.BARK_KEY,
-          icon: process.env.CUSTOM_ICON_URL
-        };
-
-        // 发送 Bark 推送
-        const barkResponse = await fetch("https://api.day.app/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(barkPayload)
-        });
-
-        const barkTextResult = await barkResponse.text();
-        let barkResult = {};
-        try {
-          barkResult = JSON.parse(barkTextResult);
-        } catch {}
-        console.log("\nBark Result:\n", barkResult || barkTextResult);
-
-        if (!barkResponse.ok || (barkResult.code && barkResult.code !== 200)) {
-          const reason = barkResult.message || `HTTP ${barkResponse.status}`;
-          eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送 Bark｜原因：Bark 推送失败：${reason}）`;
-        } else {
-          eventContent = `（${getLocalTimeString()} 刚刚给用户发了 Bark：${safeTitle}｜${safeBody}）`;
-        }
+        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
       }
     }
   }

@@ -15,7 +15,7 @@
 
 - 🧠 **持续上下文** – 即使对话中断，AI 仍能记住发生过的事
 - ⏰ **主动唤醒** – 无人说话时，AI 会自动醒来，思考、关心你
-- 📳 **Bark 推送** – 主动发消息到你的手机，像真实存在的人
+- 📳 **手机推送** – 支持 Bark / ntfy，主动发消息到你的手机，像真实存在的人
 - 🕰️ **长期时间感** – 知道自己多久没见你，什么时候主动联系过你
 - 🧩 **行为连续性** – 发过的推送、沉默的夜晚，都会被 AI 记住
 - 🎭 **人格不变** – 完全保留 Kelivo 的角色设定，不做任何破坏
@@ -35,7 +35,7 @@ LLM API
     ↑
 wake_up.js  ← 定时自动唤醒，通过 Gateway 接口注入事件
     ↓
-Bark 推送 → 你的手机
+Bark / ntfy 推送 → 你的手机
 ```
 
 - **Gateway 不修改 Kelivo 的任何人格设定**，只负责在正确的时间位置注入 AI 自己的主动行为（推送/静默）。
@@ -52,10 +52,17 @@ Bark 推送 → 你的手机
 | `wake_up.js` | 自动唤醒 Runtime。按间隔唤醒 AI，生成推送或静默，发送到手机，写入时间线。 |
 | `enhanced_messages.json` | **AI 世界时间线**。SP + 真实对话 + 推送事件。不是日志，是 AI 的当前世界。 |
 | `message_timestamps.json` | **时间戳记忆库**。通过内容指纹记录每条消息的原始时间，找回历史消息时间。 |
-| `.env` | 环境变量。API Key、Bark Key、模型名称等（不提交到 Git）。 |
+| `diary/` | **自动日记目录**。当 AI 主动输出 `[DIARY]...[/DIARY]` 时，会按日期追加保存。 |
+| `.env` | 环境变量。API Key、推送渠道、模型名称等（不提交到 Git）。 |
 | `.env.example` | 环境变量模板，供新用户参考配置。 |
 
 ---
+
+## 📋 更新日志（2026-07-11）
+
+- 📳 新增 ntfy 推送渠道：`PUSH_PROVIDER=ntfy` 时可用 Android / 桌面 / 自建 ntfy 服务接收主动消息。
+- 📔 新增自动日记：唤醒模型可以选择输出 `[DIARY]...[/DIARY]`，系统会保存到本地 `diary/YYYY-MM-DD.md`。
+- 🔁 修复非流式转发兼容：Kelivo 关闭 stream 时，Gateway 会按普通 JSON 返回，不再强制包装成 SSE。
 
 ## 📋 更新日志（2026-06-26）
 
@@ -89,13 +96,13 @@ Bark 推送 → 你的手机
 
 - **Node.js** v20 或更高版本
 - 一个可用的 LLM API（支持 OpenAI 接口格式的中转站或官方）
-- **Bark** App（iOS）及有效 Key
+- 一个推送渠道：Bark（iOS）或 ntfy（Android / 桌面 / 自建服务）
 - **Kelivo** App（用于前端交互）
 
 ### 安装与配置
 
 #### Fork-first 获取代码
-因为本项目需要修改时区、地理位置、唤醒间隔、模型、Bark Key 等个性化配置，**请先 Fork 一份到自己的账号下**，再 clone 你自己的仓库。
+因为本项目需要修改时区、地理位置、唤醒间隔、模型、推送渠道等个性化配置，**请先 Fork 一份到自己的账号下**，再 clone 你自己的仓库。
 
 不要直接把 `callie0313/dylan-heartbeat` clone 成你的运行目录。直接 clone 会让你的部署目录和上游仓库绑在一起，后续保存自己的改动、同步新版、排查配置差异都会更麻烦。
 
@@ -127,6 +134,14 @@ TARGET_API_KEY=sk-你的APIKey
 MODEL_NAME=你的模型
 BARK_KEY=你的Bark设备Key
 CUSTOM_ICON_URL=https://你的图标URL（可选）
+PUSH_PROVIDER=bark
+NTFY_SERVER_URL=https://ntfy.sh
+NTFY_TOPIC=
+NTFY_TOKEN=
+NTFY_PRIORITY=default
+NTFY_TAGS=
+DIARY_ENABLED=true
+DIARY_DIR=diary
 REQUEST_BODY_LIMIT_MB=50
 MULTIMODAL_MODE=text
 DAY_WAKE_AFTER_MINUTES=60
@@ -203,7 +218,7 @@ http://你的电脑局域网IP:3000/v1/chat/completions
 
 - 使用 `.env` 中设置的 `ADMIN_USER` 和 `ADMIN_PASSWORD` 登录
 - 实时查看 Gateway 和自动唤醒的运行状态
-- 在线修改 API 地址、Key、模型、Bark Key 等配置
+- 在线修改 API 地址、Key、模型、Bark Key 等基础配置
 - **一键重启服务**（需配合 pm2 使用，默认执行 `pm2 restart gateway wake-up`）
 
 如果你的 pm2 进程名不同，请在 `.env` 中修改：
@@ -214,7 +229,7 @@ RESTART_COMMAND=pm2 restart 你的gateway进程名 你的wake进程名
 
 安全提示：
 
-- 如果用 `http://你的IP:3000/admin` 打开管理页，浏览器可能会提示“即将提交的信息不安全”。这是因为 API Key、Bark Key 等敏感配置正在通过 HTTP 明文传输。
+- 如果用 `http://你的IP:3000/admin` 打开管理页，浏览器可能会提示“即将提交的信息不安全”。这是因为 API Key、推送 Key 等敏感配置正在通过 HTTP 明文传输。
 - 当前管理页保存配置使用 `fetch` 提交，可减少 iOS/浏览器对普通表单提交的弹窗；但这不等于 HTTP 已加密。
 - 如果管理页只在自己可信的本机或局域网短时间使用，风险相对可控。若要放到公网、校园网、公司网或任何不可信网络，请使用 HTTPS 反向代理后再访问管理页。
 
@@ -276,6 +291,68 @@ WEATHER_UNITS=metric
 如果不想暴露精确位置，可以只填城市中心点坐标。例如人在伦敦，可以填 London 的公共坐标，而不是住址坐标。
 
 天气信息会注入到唤醒 prompt 中，内容包括：天气概况、温度、体感温度、湿度、降雨、风速、日出日落。自定义 `wake_prompt.txt` 时，可以使用 `${weatherContext}` 或 `${weather}` 占位符控制注入位置。
+
+---
+
+## 📳 推送渠道
+
+默认使用 Bark：
+
+```env
+PUSH_PROVIDER=bark
+BARK_KEY=你的Bark设备Key
+```
+
+如果你使用 Android，或想使用桌面/自建推送服务，可以切换到 [ntfy](https://ntfy.sh/)：
+
+```env
+PUSH_PROVIDER=ntfy
+NTFY_SERVER_URL=https://ntfy.sh
+NTFY_TOPIC=你的topic
+NTFY_TOKEN=
+NTFY_PRIORITY=default
+NTFY_TAGS=
+```
+
+说明：
+
+- `NTFY_SERVER_URL`：ntfy 服务根地址。使用官方公共服务时保持 `https://ntfy.sh`，不要在这里拼接 topic。
+- `NTFY_TOPIC`：你的 ntfy topic。请使用不容易被猜到的随机字符串。
+- `NTFY_TOKEN`：如果你使用自建 ntfy 并开启鉴权，可填写 token；公共 topic 通常留空。
+- `NTFY_PRIORITY` / `NTFY_TAGS`：ntfy 的可选通知参数；多个 tags 用英文逗号分隔，可留空。
+
+---
+
+## 📔 自动日记
+
+自动唤醒时，模型可以选择额外写日记。只有当模型输出以下格式时才会保存：
+
+```text
+[DIARY]
+今天的日记内容……
+[/DIARY]
+```
+
+日记会按日期追加保存到：
+
+```text
+diary/YYYY-MM-DD.md
+```
+
+默认开启：
+
+```env
+DIARY_ENABLED=true
+DIARY_DIR=diary
+```
+
+如果你不想保存日记，可以设置：
+
+```env
+DIARY_ENABLED=false
+```
+
+`[DIARY]...[/DIARY]` 可以和推送内容同时出现；如果模型只写日记、不写推送，系统会记录为“本次未发送推送｜原因：只写日记”。
 
 ---
 

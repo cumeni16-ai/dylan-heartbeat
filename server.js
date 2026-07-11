@@ -221,8 +221,14 @@ function extractTimestampWithMemory(msg, tsDB) {
 function isSpecialEvent(msg) {
   if (msg.role !== "assistant") return false;
   const c = normalizeContentToText(msg.content);
-  // 批注 2026-06-26：公开版使用“用户”，但兼容早期时间线里的“宝宝”事件，避免升级后旧 Bark 事件丢失。
-  return c.includes("刚刚给宝宝发了 Bark") || c.includes("刚刚给用户发了 Bark") || c.includes("自动唤醒：本次未发送 Bark");
+  // 批注 2026-07-11：推送渠道从 Bark 扩展到 ntfy；继续兼容早期时间线里的 Bark/宝宝事件，避免升级后旧唤醒事件丢失。
+  return (
+    c.includes("刚刚给宝宝发了 Bark") ||
+    c.includes("刚刚给用户发了 Bark") ||
+    c.includes("自动唤醒：本次未发送 Bark") ||
+    c.includes("自动唤醒：本次未发送推送") ||
+    (c.includes("刚刚给用户发了") && c.includes("推送"))
+  );
 }
 
 function isRealMessageForTimeline(msg) {
@@ -353,6 +359,14 @@ const PREFERRED_ENV_ORDER = [
   "MODEL_NAME",
   "BARK_KEY",
   "CUSTOM_ICON_URL",
+  "PUSH_PROVIDER",
+  "NTFY_SERVER_URL",
+  "NTFY_TOPIC",
+  "NTFY_TOKEN",
+  "NTFY_PRIORITY",
+  "NTFY_TAGS",
+  "DIARY_ENABLED",
+  "DIARY_DIR",
   "REQUEST_BODY_LIMIT_MB",
   "MULTIMODAL_MODE",
   "DAY_WAKE_AFTER_MINUTES",
