@@ -58,6 +58,55 @@ Bark / ntfy 推送 → 你的手机
 
 ---
 
+## 🔄 已 Fork / 部署过的人怎么更新？
+
+如果你之前已经 Fork 或部署过本项目，后续想使用新版本，需要先把你的 fork 同步到最新版本，再重新部署或重启服务。
+
+### 方式一：用 GitHub 网页同步
+
+1. 打开你自己 Fork 后的仓库页面
+2. 点击 `Sync fork`
+3. 点击 `Update branch`
+4. 回到你的服务器 / 本地部署目录，执行：
+
+```bash
+git pull
+npm install
+```
+
+5. 对照新的 `.env.example`，把新增配置手动补进你自己的 `.env`
+
+注意：不要直接覆盖 `.env`，里面有你的 API Key、推送 Key、模型配置。
+
+6. 重启服务：
+
+```bash
+pm2 restart gateway wake-up
+```
+
+如果不是 pm2 部署，就停止旧进程后重新运行：
+
+```bash
+node server.js
+node wake_up.js
+```
+
+### 方式二：Railway / Render 云端部署
+
+1. 先在 GitHub 网页点击 `Sync fork`
+2. Railway / Render 一般会自动重新部署
+3. 如果没有自动部署，就手动点一次 Redeploy
+4. 到平台的环境变量设置里，对照新的 `.env.example` 补上新增变量
+
+更新时最重要的提醒：
+
+- `.env` 不会自动更新，要自己对照 `.env.example` 补新增项
+- `enhanced_messages.json`、`message_timestamps.json`、`diary/` 是你的本地运行数据，不要删
+- 更新代码后记得 `npm install`
+- 最后一定要重启 `gateway` 和 `wake-up`
+
+---
+
 ## 📋 更新日志（2026-07-11）
 
 - 📳 新增 ntfy 推送渠道：`PUSH_PROVIDER=ntfy` 时可用 Android / 桌面 / 自建 ntfy 服务接收主动消息。
