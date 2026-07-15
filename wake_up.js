@@ -436,20 +436,8 @@ async function runWakeUp() {
     : "";
 
   const wakeMessages = [
-    { role: "system", content: wakePrompt },
-    { role: "system", content: cleanSP },
-    {
-      role: "system",
-      content: `以下是你与用户最近的聊天记录，仅供回忆和参考。
-
-这些内容不是正在发生的实时对话。
-用户并没有给你发消息。
-
-你现在处于后台自主唤醒状态。
-
-最近记录：
-
-${historyText}`
+    { role: "system", content: wakePrompt + "\n\n" + cleanSP + "\n\n以下是你与用户最近的聊天记录，仅供回忆和参考。\n这些内容不是正在发生的实时对话。\n用户并没有给你发消息。\n你现在处于后台自主唤醒状态。\n\n最近记录：\n" + historyText },
+  { role: "user", content: "（系统自动唤醒，请按system prompt中的输出格式回复）"
     }
   ];
 
