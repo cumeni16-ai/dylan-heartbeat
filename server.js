@@ -171,13 +171,13 @@ function saveTimeline(messages) {
 function extractTimestamp(content) {
   if (!content || typeof content !== "string") return null;
   let match = content.match(/（?(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-  if (match) return new Date(match[1]);
+  if (match) return new Date(match[1] + ":00+08:00");
   match = content.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-  if (match) return new Date(match[1]);
+  if (match) return new Date(match[1] + ":00+08:00");
   match = content.match(/（(\d{4}\/\d{1,2}\/\d{1,2} \d{2}:\d{2})）/);
-  if (match) return new Date(match[1]);
+  if (match) return new Date(match[1] + ":00+08:00");
   match = content.match(/(\d{4}\/\d{1,2}\/\d{1,2} \d{2}:\d{2})/);
-  if (match) return new Date(match[1]);
+  if (match) return new Date(match[1] + ":00+08:00");
   return null;
 }
 
