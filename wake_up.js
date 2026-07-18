@@ -157,7 +157,8 @@ async function sendPushNotification({ title, body }) {
 }
 
 function isDayTime(date = new Date()) {
-  const hour = date.getHours();
+  const parts = getDatePartsInTimeZone(date);
+  const hour = Number(parts.hour);
   const start = readNumberEnv("WAKE_DAY_START_HOUR", 10, { min: 0, max: 23 });
   const end = readNumberEnv("WAKE_DAY_END_HOUR", 24, { min: 1, max: 24 });
   if (start === end) return true;
@@ -313,14 +314,8 @@ function getChinaTimeString() {
 }
 
 function getLocalTimeString() {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  const mm = pad(now.getMonth() + 1);
-  const dd = pad(now.getDate());
-  const hh = pad(now.getHours());
-  const min = pad(now.getMinutes());
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  const parts = getDatePartsInTimeZone(new Date());
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 function shouldWake(lastUserTime) {
