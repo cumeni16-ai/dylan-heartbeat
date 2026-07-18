@@ -333,6 +333,11 @@ function getLastUserTime(messages) {
       if (match) return new Date(match[1] + ":00+08:00");
     }
   }
+  for (const msg of reversed) {
+    if (msg.role === "user") {
+      return new Date();
+    }
+  }
   return null;
 }
 
