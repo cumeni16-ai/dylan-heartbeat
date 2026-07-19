@@ -335,7 +335,12 @@ function getLastUserTime(messages) {
   }
   for (const msg of reversed) {
     if (msg.role === "user") {
-      return new Date();
+      try {
+        const stat = fs.statSync(TIMELINE_PATH);
+        return stat.mtime;
+      } catch (e) {
+        return new Date();
+      }
     }
   }
   return null;
